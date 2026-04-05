@@ -116,12 +116,9 @@ const CONFIG = {
     pollInterval: 300000 // 5 min
   },
   ransomwarelive: {
-    // Ransomware.live Pro API (via local CORS proxy with X-API-KEY)
-    recentVictimsUrl: 'http://localhost:3001/proxy?url=https://api-pro.ransomware.live/victims/recent',
-    groupsUrl: 'http://localhost:3001/proxy?url=https://api-pro.ransomware.live/groups',
-    // Free API fallback (may be slow/down)
-    directRecentVictims: 'http://localhost:3001/proxy?url=https://api.ransomware.live/v2/recentvictims',
-    directGroups: 'http://localhost:3001/proxy?url=https://api.ransomware.live/v2/groups',
+    // Target URLs (will be proxied automatically)
+    recentVictimsUrl: 'https://api.ransomware.live/v2/recentvictims',
+    groupsUrl: 'https://api.ransomware.live/v2/groups',
     fetchTimeout: 30000,
     pollInterval: 300000 // 5 min
   },
@@ -148,6 +145,31 @@ const CONFIG = {
   anthropicApiKey: null,
   anthropicModel: 'claude-haiku-4-5-20251001'
 };
+
+// ---- CORS Proxy Helper ----
+// Tries direct fetch first, then local proxy, then public CORS proxies
+async function corsFetch(url, options = {}) {
+  const timeout = options.timeout || 30000;
+  const attempts = [
+    url,
+    `http://localhost:3001/proxy?url=${encodeURIComponent(url)}`,
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+  ];
+  for (const attemptUrl of attempts) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeout);
+      const resp = await fetch(attemptUrl, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp;
+    } catch (e) {
+      // try next
+    }
+  }
+  throw new Error(`All fetch attempts failed for ${url}`);
+}
 
 // ---- Automotive Relevance Classifier ----
 // Multi-layer filter: word-boundary matching → false-positive rejection → context scoring → optional AI
@@ -1233,8 +1255,7 @@ async function fetchCTLogs() {
   for (const domain of domains) {
     try {
       const url = `${CONFIG.crtsh.baseUrl}/?q=${encodeURIComponent(domain)}&output=json&exclude=expired`;
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`crt.sh ${resp.status}`);
+      const resp = await corsFetch(url);
       const data = await resp.json();
       if (Array.isArray(data)) {
         // Only recent certs (last 90 days)
@@ -1316,8 +1337,7 @@ async function fetchCISA() {
 
   // --- Part 1: KEV Catalog (Known Exploited Vulnerabilities) ---
   try {
-    const resp = await fetch(CONFIG.cisa.kevUrl);
-    if (!resp.ok) throw new Error(`KEV ${resp.status}`);
+    const resp = await corsFetch(CONFIG.cisa.kevUrl);
     const data = await resp.json();
     const vulns = data.vulnerabilities || [];
 
@@ -1502,25 +1522,17 @@ async function fetchMISPManifest() {
     { url: CONFIG.misp.botvrijManifest, base: CONFIG.misp.botvrijBase, name: 'Botvrij' }
   ];
 
-  // Try each feed: first via local proxy, then direct
+  // Try each feed using CORS proxy helper
   for (const feed of feeds) {
-    const attempts = [
-      `http://localhost:3001/proxy?url=${encodeURIComponent(feed.url)}`,
-      feed.url
-    ];
-    for (const attemptUrl of attempts) {
-      try {
-        const resp = await fetch(attemptUrl);
-        if (!resp.ok) throw new Error(`${feed.name} ${resp.status}`);
-        manifest = await resp.json();
-        baseUrl = feed.base;
-        console.log(`[CARTINT] MISP: Loaded manifest from ${feed.name} (${Object.keys(manifest).length} events)`);
-        break;
-      } catch (e) {
-        console.warn(`[CARTINT] MISP ${feed.name} fetch failed:`, e.message);
-      }
+    try {
+      const resp = await corsFetch(feed.url);
+      manifest = await resp.json();
+      baseUrl = feed.base;
+      console.log(`[CARTINT] MISP: Loaded manifest from ${feed.name} (${Object.keys(manifest).length} events)`);
+      break;
+    } catch (e) {
+      console.warn(`[CARTINT] MISP ${feed.name} fetch failed:`, e.message);
     }
-    if (manifest) break;
   }
 
   if (!manifest) return null;
@@ -1585,8 +1597,8 @@ async function fetchMISPManifest() {
 
   for (const ev of topEvents) {
     try {
-      const resp = await fetch(`${baseUrl}${ev.uuid}.json`);
-      if (resp.ok) {
+      const resp = await corsFetch(`${baseUrl}${ev.uuid}.json`);
+      if (resp) {
         const data = await resp.json();
         const event = data.Event || data;
         enrichedEvents.push({
@@ -1684,32 +1696,19 @@ async function fetchRansomwareLive() {
   let victims = [];
   let usedSource = '';
 
-  // Try proxy URL first (has API key), then direct API
-  const fetchTimeout = CONFIG.ransomwarelive.fetchTimeout || 45000;
-  const urls = [
-    { url: CONFIG.ransomwarelive.recentVictimsUrl, label: 'proxy (authenticated)', timeout: fetchTimeout },
-    { url: CONFIG.ransomwarelive.directRecentVictims, label: 'direct API', timeout: fetchTimeout }
-  ];
-
-  for (const { url, label, timeout } of urls) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeout);
-      const resp = await fetch(url, { signal: controller.signal });
-      clearTimeout(timer);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
-      // Pro API wraps in { victims: [...] }, free API returns bare array
-      const list = Array.isArray(data) ? data : (data && Array.isArray(data.victims) ? data.victims : []);
-      if (list.length > 0) {
-        victims = list;
-        usedSource = label;
-        console.log(`[CARTINT] Dark Web: ${victims.length} victims loaded from ${label}`);
-        break;
-      }
-    } catch (e) {
-      console.warn(`[CARTINT] Dark Web fetch failed (${label}):`, e.message);
+  try {
+    const resp = await corsFetch(CONFIG.ransomwarelive.recentVictimsUrl, {
+      timeout: CONFIG.ransomwarelive.fetchTimeout || 45000
+    });
+    const data = await resp.json();
+    const list = Array.isArray(data) ? data : (data && Array.isArray(data.victims) ? data.victims : []);
+    if (list.length > 0) {
+      victims = list;
+      usedSource = 'ransomware.live API';
+      console.log(`[CARTINT] Dark Web: ${victims.length} victims loaded`);
     }
+  } catch (e) {
+    console.warn(`[CARTINT] Dark Web fetch failed:`, e.message);
   }
 
   if (victims.length === 0) {
