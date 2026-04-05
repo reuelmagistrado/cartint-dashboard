@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CARTINT — ATM Matrix</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="matrix.css">
+  <script src="theme.js"></script>
+</head>
+<body>
+  <!-- Scan-line overlay -->
+  <div class="scanline-overlay"></div>
+
+  <!-- Top Navigation -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <rect width="28" height="28" rx="6" fill="#E63946"/>
+            <path d="M8 14L12 10L16 14L12 18Z" fill="white" opacity="0.9"/>
+            <path d="M12 14L16 10L20 14L16 18Z" fill="white" opacity="0.6"/>
+          </svg>
+        </div>
+        <span class="logo-text">CARTINT</span>
+      </div>
+      <nav class="topbar-nav">
+        <a href="index.html" class="nav-link">Dashboard</a>
+        <a href="matrix.html" class="nav-link active">ATM Matrix</a>
+        <a href="intel.html" class="nav-link">Generate Intel</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+      <div class="atm-status">
+        <span class="atm-pulse"></span>
+        <span class="atm-count" id="atmCount">302</span>
+        <span class="atm-label">ATM</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Layout -->
+  <div class="layout no-sidebar">
+    <main class="main">
+
+      <!-- Threat Selector Banner -->
+      <div class="matrix-threat-banner" id="threatBanner">
+        <div class="threat-banner-left">
+          <div class="threat-select-wrapper">
+            <svg class="threat-select-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            <select id="threatSelector" class="threat-selector">
+              <option value="">Select threat to map techniques...</option>
+            </select>
+          </div>
+        </div>
+        <div class="threat-banner-meta" id="threatBannerMeta" style="display:none;">
+          <div class="banner-meta-item">
+            <span class="banner-meta-label">GROUP</span>
+            <span class="banner-meta-value" id="bannerGroup">—</span>
+          </div>
+          <div class="banner-meta-item">
+            <span class="banner-meta-label">TARGET</span>
+            <span class="banner-meta-value" id="bannerTarget">—</span>
+          </div>
+          <div class="banner-meta-item">
+            <span class="banner-meta-label">TECHNIQUES</span>
+            <span class="banner-meta-value" id="bannerTechCount">0</span>
+          </div>
+          <div class="banner-meta-item">
+            <span class="banner-meta-label">CONFIDENCE</span>
+            <span class="banner-meta-value banner-confidence" id="bannerConfidence">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Matrix Grid -->
+      <div class="matrix-container" id="matrixContainer">
+        <div class="matrix-grid" id="matrixGrid">
+          <!-- Columns will be injected by JS -->
+        </div>
+      </div>
+
+      <!-- Technique Detail Slide-out -->
+      <div class="technique-detail-overlay" id="techniqueOverlay" style="display:none;">
+        <div class="technique-detail-panel" id="techniqueDetail">
+          <button class="technique-detail-close" id="techniqueClose">&times;</button>
+          <div class="technique-detail-header">
+            <span class="technique-detail-id" id="detailId">ATM-T0000</span>
+            <h3 class="technique-detail-name" id="detailName">Technique Name</h3>
+          </div>
+          <div class="technique-detail-tactics" id="detailTactics"></div>
+          <div class="technique-detail-description" id="detailDescription"></div>
+          <div class="technique-detail-section">
+            <h4 class="technique-detail-section-title">ASSOCIATED CAMPAIGNS</h4>
+            <div class="technique-detail-campaigns" id="detailCampaigns"></div>
+          </div>
+          <div class="technique-detail-section">
+            <h4 class="technique-detail-section-title">EXTERNAL REFERENCES</h4>
+            <div class="technique-detail-refs" id="detailRefs"></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script src="matrix.js"></script>
+</body>
+</html>

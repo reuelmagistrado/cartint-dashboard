@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CARTINT — Automotive Threat Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="theme.js"></script>
+</head>
+<body>
+  <!-- Scan-line overlay -->
+  <div class="scanline-overlay"></div>
+
+  <!-- Top Navigation -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <rect width="28" height="28" rx="6" fill="#E63946"/>
+            <path d="M8 14L12 10L16 14L12 18Z" fill="white" opacity="0.9"/>
+            <path d="M12 14L16 10L20 14L16 18Z" fill="white" opacity="0.6"/>
+          </svg>
+        </div>
+        <span class="logo-text">CARTINT</span>
+      </div>
+      <nav class="topbar-nav">
+        <a href="index.html" class="nav-link active">Dashboard</a>
+        <a href="matrix.html" class="nav-link">ATM Matrix</a>
+        <a href="intel.html" class="nav-link">Generate Intel</a>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+      <div class="atm-status">
+        <span class="atm-pulse"></span>
+        <span class="atm-count" id="atmCount">302</span>
+        <span class="atm-label">ATM</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Layout -->
+  <div class="layout no-sidebar">
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Stat Cards -->
+      <!-- AI Filter Config (collapsible) -->
+      <div class="ai-config" id="aiConfig">
+        <button class="ai-config-toggle" id="aiConfigToggle">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          AI Filter
+        </button>
+        <div class="ai-config-panel" id="aiConfigPanel" style="display:none;">
+          <label class="ai-config-label">Anthropic API Key (optional — enables Claude-powered classification for ambiguous results)</label>
+          <div class="ai-config-input-row">
+            <input type="password" id="anthropicKeyInput" class="ai-config-input" placeholder="sk-ant-..." />
+            <button class="ai-config-save" id="aiConfigSave">Save</button>
+          </div>
+          <div class="ai-config-hint">Without a key, the rule-based classifier filters results using word-boundary matching, false-positive rejection, and context scoring.</div>
+        </div>
+      </div>
+
+      <!-- Fetch Status Bar -->
+      <div class="fetch-status" id="fetchStatus">
+        <div class="fetch-status-inner">
+          <span class="streaming-dot"></span>
+          <span id="fetchStatusText">Initializing data feeds...</span>
+        </div>
+        <button class="fetch-refresh-btn" id="fetchRefreshBtn" title="Refresh all sources">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
+      </div>
+
+      <section class="stat-cards">
+        <div class="stat-card" data-stat="telematics">
+          <div class="stat-value" id="statTelematics">0</div>
+          <div class="stat-label">Critical / High CVEs</div>
+          <div class="stat-sparkline" id="sparkTelematics"></div>
+          <div class="stat-trend neutral">Scanning...</div>
+        </div>
+        <div class="stat-card" data-stat="ota">
+          <div class="stat-value" id="statOTA">0</div>
+          <div class="stat-label">CT Log Certificates</div>
+          <div class="stat-sparkline" id="sparkOTA"></div>
+          <div class="stat-trend neutral">Scanning...</div>
+        </div>
+        <div class="stat-card" data-stat="github">
+          <div class="stat-value" id="statGithub">0</div>
+          <div class="stat-label">GitHub Leaks</div>
+          <div class="stat-sparkline" id="sparkGithub"></div>
+          <div class="stat-trend neutral">Scanning...</div>
+        </div>
+        <div class="stat-card" data-stat="supplier">
+          <div class="stat-value" id="statSupplier">0</div>
+          <div class="stat-label">Supplier Breaches</div>
+          <div class="stat-sparkline" id="sparkSupplier"></div>
+          <div class="stat-trend neutral">Scanning...</div>
+        </div>
+        <div class="stat-card" data-stat="techniques">
+          <div class="stat-value" id="statTechniques">0</div>
+          <div class="stat-label">ATM Techniques Mapped</div>
+          <div class="stat-sparkline" id="sparkTechniques"></div>
+          <div class="stat-trend neutral">Scanning...</div>
+        </div>
+      </section>
+
+      <!-- Main Grid -->
+      <section class="dashboard-grid">
+        <!-- Live Threat Feed -->
+        <div class="panel threat-feed-panel">
+          <div class="panel-header">
+            <div class="panel-header-left">
+              <h2 class="panel-title">LIVE THREAT FEED</h2>
+              <div class="feed-filter-tag" id="feedFilterTag" style="display:none;">
+                <span id="feedFilterName"></span>
+                <button class="feed-filter-clear" id="feedFilterClear" title="Clear filter">&times;</button>
+              </div>
+            </div>
+            <div class="streaming-indicator">
+              <span class="streaming-dot"></span>
+              <span>Streaming</span>
+            </div>
+          </div>
+          <div class="threat-feed" id="threatFeed">
+            <!-- Threats will be injected here -->
+          </div>
+        </div>
+
+        <!-- Right Column -->
+        <div class="right-column">
+          <!-- Techniques Per Tactic -->
+          <div class="panel techniques-panel">
+            <div class="panel-header">
+              <h2 class="panel-title">TECHNIQUES PER TACTIC</h2>
+            </div>
+            <div class="techniques-chart" id="techniquesChart">
+              <!-- Chart bars will be injected here -->
+            </div>
+          </div>
+
+          <!-- Data Sources -->
+          <div class="panel sources-panel">
+            <div class="panel-header">
+              <h2 class="panel-title">DATA SOURCES</h2>
+            </div>
+            <div class="data-sources" id="dataSources">
+              <!-- Source badges will be injected here -->
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

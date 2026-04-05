@@ -1,0 +1,554 @@
+/* ============================================
+   CARTINT v2.0 — ATM Matrix Styles
+   14-column tactic grid with technique cells
+   ============================================ */
+
+/* ---- Threat Selector Banner ---- */
+.matrix-threat-banner {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.threat-banner-left {
+  flex: 1;
+  min-width: 280px;
+}
+
+.threat-select-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.threat-select-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.threat-selector {
+  width: 100%;
+  max-width: 520px;
+  padding: 10px 16px 10px 36px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.85rem;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b919e' stroke-width='2' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  transition: border-color 0.2s;
+}
+
+.threat-selector:hover {
+  border-color: var(--border-active);
+}
+
+.threat-selector:focus {
+  outline: none;
+  border-color: var(--red);
+  box-shadow: 0 0 0 2px var(--red-dim);
+}
+
+.threat-selector option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 8px;
+}
+
+.threat-selector optgroup {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.5px;
+}
+
+.threat-banner-meta {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.banner-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.banner-meta-label {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+}
+
+.banner-meta-value {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.banner-confidence {
+  color: var(--red) !important;
+}
+
+/* ---- Matrix Container ---- */
+.matrix-container {
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 8px;
+}
+
+.matrix-grid {
+  display: grid;
+  grid-template-columns: repeat(14, minmax(130px, 1fr));
+  gap: 6px;
+  min-width: 1820px;
+}
+
+/* ---- Matrix Column ---- */
+.matrix-column {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: matrixColFade 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition: opacity 0.3s ease;
+}
+
+.matrix-column.dimmed {
+  opacity: 0.25;
+}
+
+@keyframes matrixColFade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- Tactic Header ---- */
+.matrix-tactic-header {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 10px 10px 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.tactic-color-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px 2px 0 0;
+}
+
+.tactic-header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.tactic-name {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.tactic-count {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.tactic-id {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-top: 4px;
+  display: block;
+}
+
+/* ---- Matrix Cells Container ---- */
+.matrix-cells {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* ---- Technique Cell ---- */
+.matrix-cell {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 8px 7px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+  animation: cellFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.matrix-cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  transition: background 0.3s ease;
+  pointer-events: none;
+}
+
+.matrix-cell:hover {
+  border-color: var(--border-active);
+  background: var(--bg-card-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes cellFade {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.cell-id {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 3px;
+  letter-spacing: 0.3px;
+}
+
+.cell-name {
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  display: block;
+}
+
+/* ---- Highlighted / Dimmed States ---- */
+.matrix-cell.highlighted {
+  border-color: var(--red);
+  background: var(--red-dim);
+  box-shadow: 0 0 16px var(--red-dim), inset 0 0 20px rgba(230, 57, 70, 0.05);
+  animation: highlightPulse 2s ease-in-out infinite;
+}
+
+.matrix-cell.highlighted .cell-id {
+  color: var(--red);
+}
+
+.matrix-cell.highlighted .cell-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.matrix-cell.highlighted::before {
+  background: linear-gradient(135deg, rgba(230, 57, 70, 0.08), transparent);
+}
+
+@keyframes highlightPulse {
+  0%, 100% {
+    box-shadow: 0 0 16px var(--red-dim), inset 0 0 20px rgba(230, 57, 70, 0.05);
+  }
+  50% {
+    box-shadow: 0 0 24px var(--red-glow), inset 0 0 30px rgba(230, 57, 70, 0.08);
+  }
+}
+
+.matrix-cell.dimmed {
+  opacity: 0.2;
+  transform: scale(0.98);
+}
+
+/* ---- Technique Detail Overlay ---- */
+.technique-detail-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.technique-detail-overlay.active {
+  opacity: 1;
+}
+
+.technique-detail-panel {
+  width: 480px;
+  max-width: 90vw;
+  height: 100vh;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-default);
+  overflow-y: auto;
+  padding: 28px 24px;
+  position: relative;
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.technique-detail-overlay.active .technique-detail-panel {
+  transform: translateX(0);
+}
+
+.technique-detail-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.technique-detail-close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+/* ---- Detail Header ---- */
+.technique-detail-header {
+  margin-bottom: 20px;
+  padding-right: 40px;
+}
+
+.technique-detail-id {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--red);
+  letter-spacing: 0.5px;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.technique-detail-name {
+  font-family: var(--font-sans);
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+/* ---- Detail Tactics ---- */
+.technique-detail-tactics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+
+.detail-tactic-tag {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid;
+  letter-spacing: 0.3px;
+}
+
+/* ---- Detail Description ---- */
+.technique-detail-description {
+  font-size: 0.85rem;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* ---- Detail Sections ---- */
+.technique-detail-section {
+  margin-bottom: 24px;
+}
+
+.technique-detail-section-title {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+/* ---- Detail Campaigns ---- */
+.detail-campaign {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+
+.detail-campaign-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.detail-campaign-id {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--orange);
+  flex-shrink: 0;
+}
+
+.detail-campaign-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.detail-campaign-desc {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.detail-campaign-link {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--blue);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.detail-campaign-link:hover {
+  color: var(--cyan);
+}
+
+/* ---- Detail References ---- */
+.detail-ref-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin-bottom: 4px;
+  text-decoration: none;
+  font-size: 0.78rem;
+  color: var(--blue);
+  transition: all 0.2s;
+}
+
+.detail-ref-link:hover {
+  border-color: var(--blue);
+  background: rgba(72, 149, 239, 0.06);
+}
+
+.detail-ref-link svg {
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.detail-empty {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 0;
+}
+
+/* ---- Matrix Error ---- */
+.matrix-error {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+.matrix-error code {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 1600px) {
+  .matrix-grid {
+    grid-template-columns: repeat(14, minmax(110px, 1fr));
+    min-width: 1540px;
+  }
+}
+
+@media (max-width: 900px) {
+  .matrix-threat-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .threat-banner-meta {
+    gap: 16px;
+  }
+}
