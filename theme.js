@@ -30,11 +30,28 @@
     updateIcon(next);
   }
 
+  function initMobileMenu() {
+    var toggleBtn = document.getElementById('mobileMenuToggle');
+    var overlay = document.getElementById('mobileMenuOverlay');
+    if (!toggleBtn || !overlay) return;
+
+    toggleBtn.addEventListener('click', function () {
+      overlay.classList.toggle('open');
+    });
+
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) {
+        overlay.classList.remove('open');
+      }
+    });
+  }
+
   function init() {
     var theme = localStorage.getItem(STORAGE_KEY) || 'dark';
     updateIcon(theme);
     var btn = document.getElementById('themeToggle');
     if (btn) btn.addEventListener('click', toggle);
+    initMobileMenu();
   }
 
   // Wire up immediately if DOM is ready, otherwise wait

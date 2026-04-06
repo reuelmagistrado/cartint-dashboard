@@ -47,8 +47,24 @@
         <span class="atm-count" id="atmCount">302</span>
         <span class="atm-label">ATM</span>
       </div>
+      <button class="mobile-menu-toggle" id="mobileMenuToggle" title="Menu" aria-label="Toggle navigation menu">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
     </div>
   </header>
+
+  <!-- Mobile Menu Overlay -->
+  <div class="mobile-menu-overlay" id="mobileMenuOverlay">
+    <nav class="mobile-menu">
+      <a href="index.html" class="mobile-nav-link">Dashboard</a>
+      <a href="matrix.html" class="mobile-nav-link">ATM Matrix</a>
+      <a href="intel.html" class="mobile-nav-link active">Generate Intel</a>
+    </nav>
+  </div>
 
   <!-- Layout -->
   <div class="layout no-sidebar">
