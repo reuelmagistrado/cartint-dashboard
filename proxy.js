@@ -37,7 +37,9 @@ const ALLOWED_DOMAINS = [
   'www.psbdmp.ws',
   'darknetlive.com',
   'www.darknetlive.com',
-  'raw.githubusercontent.com'
+  'raw.githubusercontent.com',
+  'asrg.io',
+  'www.asrg.io'
 ];
 
 // API keys for authenticated endpoints (injected as X-API-KEY header)

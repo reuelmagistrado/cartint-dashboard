@@ -1,6 +1,6 @@
 /* ============================================
    CARTINT v2.0 — Dashboard Logic
-   Live data from NVD, GitHub, ExploitDB, crt.sh
+   Live data from NVD, GitHub, ASRG, CISA, Dark Web
    ============================================ */
 
 // ---- Configuration ----
@@ -75,45 +75,13 @@ const CONFIG = {
     queriesPerPoll: 3, // queries per category per poll cycle
     pollInterval: 90000 // 90 sec
   },
-  exploitdb: {
-    // ExploitDB data is mirrored on the exploit-database GitHub repo
-    baseUrl: 'https://api.github.com/search/code',
-    queries: [
-      'automotive vehicle',
-      'CAN bus vehicle',
-      'OBD automotive',
-      'telematics vehicle',
-      'ECU automotive',
-      'vehicle remote exploit',
-      'car hacking',
-      'infotainment exploit'
-    ],
-    pollInterval: 120000
-  },
-  crtsh: {
-    baseUrl: 'https://crt.sh',
-    domains: [
-      '%.ota.toyota.com',
-      '%.connected.bmw.com',
-      '%.telematics.ford.com',
-      '%.vehicle.api.%',
-      '%.fleet.%',
-      '%.ota.%vehicle%',
-      '%.toyota.com',
-      '%.bmw.com',
-      '%.ford.com',
-      '%.mercedes-benz.com',
-      '%.volkswagen.com',
-      '%.teslamotors.com',
-      '%.hyundai.com',
-      '%.kia.com',
-      '%.stellantis.com',
-      '%.bosch.com',
-      '%.continental-automotive.com'
-    ],
-    domainIndex: 0,
-    domainsPerPoll: 3,
-    pollInterval: 300000 // 5 min
+  asrg: {
+    // ASRG (Automotive Security Research Group) — automotive-specific advisories
+    // API returns paginated docs with CVE, CVSS, affected products, CWE/CAPEC
+    baseUrl: 'https://asrg.io/api/security-advisories',
+    // Fetch all pages each poll cycle (39 advisories across 4 pages as of 2026-07)
+    maxPages: 5,
+    pollInterval: 600000 // 10 min
   },
   ransomwarelive: {
     // Target URLs (will be proxied automatically)
@@ -176,17 +144,6 @@ const CONFIG = {
     groupDetailInterval: 6, // every 6th poll cycle, fetch group details
     pollCount: 0,
     pollInterval: 300000 // 5 min
-  },
-  misp: {
-    // CIRCL OSINT Feed — curated threat intel events (no auth)
-    circlManifest: 'https://www.circl.lu/doc/misp/feed-osint/manifest.json',
-    circlBase: 'https://www.circl.lu/doc/misp/feed-osint/',
-    // Botvrij.eu — open-source IoC feed (fallback)
-    botvrijManifest: 'https://www.botvrij.eu/data/feed-osint/manifest.json',
-    botvrijBase: 'https://www.botvrij.eu/data/feed-osint/',
-    // Max events to fetch details for (to avoid hammering the server)
-    maxEventDetails: 15,
-    pollInterval: 600000 // 10 min
   },
   cisa: {
     // KEV (Known Exploited Vulnerabilities) — single JSON, no auth
@@ -409,7 +366,7 @@ const AUTO_CLASSIFIER = {
     /\b(stolen\s+(passport|id|license|ssn))\b/i,
     // Generic dark web marketplace terms that aren't automotive
     /\b(buy\s+cheap|wholesale|free\s+shipping|discount\s+code)\b/i,
-    // Generic MISP daily feeds that are never automotive-specific
+    // Generic dark web marketplace terms that aren't automotive
     /\bKRVTZ-NET\b/i,
     /\bMaltrail\s+IOC\b/i,
     /\bIDS\s+alerts\s+for\s+\d{4}/i,
@@ -690,10 +647,10 @@ const SOURCE_CACHE_TTL = {
   'Dark Web':       2 * 60 * 60 * 1000,  // 2 hours (Ahmia + pastes + ransomware.live)
   'NVD/CVE':        1 * 60 * 60 * 1000,  // 1 hour
   'GitHub':         30 * 60 * 1000,       // 30 min
-  'ExploitDB':      1 * 60 * 60 * 1000,  // 1 hour
-  'CT Logs':        2 * 60 * 60 * 1000,  // 2 hours
+  'ASRG':           1 * 60 * 60 * 1000,  // 1 hour
+  'CISA KEV':       2 * 60 * 60 * 1000,  // 2 hours
   'Firmware Repos': 3 * 60 * 60 * 1000,  // 3 hours (CISA)
-  'MISP':           3 * 60 * 60 * 1000   // 3 hours
+  'Firmware Repos': 3 * 60 * 60 * 1000   // 3 hours
 };
 
 const CACHE_KEY_THREATS = 'cartint_cached_threats';
@@ -1226,174 +1183,139 @@ async function fetchGitHubLeaks() {
   }
 }
 
-async function fetchExploitDB() {
-  const sourceKey = 'ExploitDB';
+// ---- ASRG Security Advisories ----
+// Automotive Security Research Group — automotive-specific vulnerability disclosures
+// Every advisory is automotive-relevant by design (no filtering needed)
+
+async function fetchASRG() {
+  const sourceKey = 'ASRG';
   updateSourceStatus(sourceKey, 'fetching');
 
-  try {
-    const allResults = [];
-    const queries = CONFIG.exploitdb.queries.slice(0, 3);
+  const allAdvisories = [];
+  const maxPages = CONFIG.asrg.maxPages;
 
-    for (const query of queries) {
+  for (let page = 1; page <= maxPages; page++) {
+    try {
+      const url = `${CONFIG.asrg.baseUrl}?page=${page}`;
+      let data = null;
+
+      // Try local proxy first (if running), then CORS proxies
       try {
-        const url = `${CONFIG.exploitdb.baseUrl}?q=${encodeURIComponent(query)}+repo:offensive-security/exploitdb+path:exploits&per_page=5`;
-        const resp = await fetch(url, {
-          headers: { 'Accept': 'application/vnd.github.v3+json' }
+        const resp = await fetch(`http://localhost:3001/proxy?url=${encodeURIComponent(url)}`, {
+          signal: AbortSignal.timeout(15000)
         });
-        if (resp.status === 403 || resp.status === 429) {
-          console.warn('[CARTINT] GitHub rate limited for ExploitDB search');
-          break;
+        if (resp.ok) {
+          data = await resp.json();
         }
-        if (!resp.ok) throw new Error(`ExploitDB ${resp.status}`);
-        const data = await resp.json();
-        if (data.items) {
-          allResults.push(...data.items.map(item => ({ ...item, _query: query })));
-        }
-        await new Promise(resolve => setTimeout(resolve, 3000));
       } catch (e) {
-        console.warn(`[CARTINT] ExploitDB search failed for "${query}":`, e.message);
+        // Proxy not available — try CORS proxies
       }
+
+      if (!data) {
+        const resp = await corsFetch(url, { timeout: 15000 });
+        if (resp) data = await resp.json();
+      }
+
+      if (!data || !data.docs || data.docs.length === 0) break;
+
+      allAdvisories.push(...data.docs);
+      console.log(`[CARTINT] ASRG page ${page}: ${data.docs.length} advisories`);
+
+      // Stop if no more pages
+      if (!data.hasNextPage) break;
+
+      // Rate limit between pages
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (e) {
+      console.warn(`[CARTINT] ASRG page ${page} fetch failed:`, e.message);
+      break;
     }
+  }
 
-    // Deduplicate
-    const seen = new Set();
-    const unique = allResults.filter(item => {
-      if (seen.has(item.path)) return false;
-      seen.add(item.path);
-      return true;
-    });
-
-    // Filter through automotive classifier — don't pass query as context to avoid score inflation
-    const relevant = unique.filter(item => {
-      const textToCheck = `${item.name || ''} ${item.path || ''} ${item.repository?.description || ''}`;
-      return isAutomotiveRelevant(textToCheck);
-    });
-
-    const threats = relevant.map(item => {
-      const fileName = item.name?.replace(/\.\w+$/, '').replace(/[-_]/g, ' ') || 'Unknown exploit';
-      const path = item.path || '';
-      const fullText = `${fileName} ${path} ${item._query}`;
-      const techniques = extractTechniques(fullText);
-      const component = extractComponent(fullText);
-      const oem = extractOEM(fullText);
-      const threatId = generateId('exploitdb', path);
-
-      const edbMatch = path.match(/exploits\/\w+\/(\d+)/);
-      const edbId = edbMatch ? `EDB-${edbMatch[1]}` : '';
-
-      return {
-        id: threatId,
-        title: `${edbId ? edbId + ': ' : ''}${sanitize(fileName)}`,
-        severity: 'high',
-        oem,
-        component,
-        techniques,
-        source: 'ExploitDB',
-        sourceDetail: 'ExploitDB Feed',
-        confidence: 90,
-        sources: 1,
-        time: 'Indexed',
-        rawDate: new Date(),
-        link: item.html_url
-      };
-    });
-
-    updateSourceStatus(sourceKey, 'active', threats.length);
-    return threats;
-  } catch (e) {
-    console.error('[CARTINT] ExploitDB fetch error:', e.message);
+  if (allAdvisories.length === 0) {
+    console.warn('[CARTINT] ASRG: No advisories fetched');
     updateSourceStatus(sourceKey, 'error');
     return [];
   }
-}
 
-async function fetchCTLogs() {
-  const sourceKey = 'CT Logs';
-  updateSourceStatus(sourceKey, 'fetching');
+  // Convert ASRG advisories to threat objects
+  // All ASRG advisories are automotive by definition — no classifier filtering needed
+  const threats = allAdvisories.map(adv => {
+    const title = adv.title || 'Unknown Advisory';
+    const cveId = adv.cveId || '';
+    const description = adv.description || '';
+    const affectedProducts = adv.affectedProducts || '';
+    const problemType = adv.problemType || '';
+    const severity = (adv.severity || 'Medium').toLowerCase();
+    const cvss31 = adv.cvss31 || '';
+    const cvss40 = adv.cvss40 || '';
+    const references = adv.references || '';
+    const credits = adv.credits || '';
+    const publishedDate = adv.publishedDate || adv.createdAt || '';
 
-  const allCerts = [];
+    const fullText = `${title} ${description} ${affectedProducts} ${problemType}`;
+    const techniques = extractTechniques(fullText);
+    const component = extractComponent(fullText);
+    const oem = extractOEM(fullText);
+    const threatId = generateId('asrg', adv.id?.toString() || cveId || title);
 
-  // Rotate domains across polls to cover all OEMs over time
-  const n = CONFIG.crtsh.domainsPerPoll;
-  const start = CONFIG.crtsh.domainIndex;
-  const domains = [];
-  for (let i = 0; i < n; i++) {
-    domains.push(CONFIG.crtsh.domains[(start + i) % CONFIG.crtsh.domains.length]);
-  }
-  CONFIG.crtsh.domainIndex = (start + n) % CONFIG.crtsh.domains.length;
+    // Determine severity level
+    let sevLevel = 'medium';
+    const sevLower = severity.toLowerCase();
+    if (sevLower === 'critical') sevLevel = 'critical';
+    else if (sevLower === 'high') sevLevel = 'high';
+    else if (sevLower === 'low') sevLevel = 'low';
 
-  for (const domain of domains) {
-    try {
-      const url = `${CONFIG.crtsh.baseUrl}/?q=${encodeURIComponent(domain)}&output=json&exclude=expired`;
-      const resp = await corsFetch(url);
-      const data = await resp.json();
-      if (Array.isArray(data)) {
-        // Only recent certs (last 90 days)
-        const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-        const recent = data.filter(cert => {
-          const ts = new Date(cert.entry_timestamp || cert.not_before || 0);
-          return ts > cutoff;
-        });
-        allCerts.push(...recent.slice(0, 10).map(cert => ({ ...cert, _domain: domain })));
-      }
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    } catch (e) {
-      console.warn(`[CARTINT] crt.sh fetch failed for "${domain}":`, e.message);
-    }
-  }
+    // Extract CVSS score for confidence calibration
+    const cvssMatch = (cvss31 || cvss40 || '').match(/^[\d.]+/);
+    const cvssScore = cvssMatch ? parseFloat(cvssMatch[0]) : 0;
 
-  // Deduplicate by common name
-  const seen = new Set();
-  const unique = allCerts.filter(cert => {
-    const key = cert.common_name || cert.name_value;
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+    // Higher confidence for ASRG (purpose-built automotive source, all entries relevant)
+    let confidence = 95;
+    if (cvssScore >= 7) confidence = 96;
+    if (cvssScore >= 9) confidence = 98;
 
-  // Classify cert relevance — look for automotive-specific subdomains
-  const autoSubdomains = /ota|telematics|vehicle|connected|fleet|diagnostic|v2x|infotainment|api|update|firmware/i;
+    // Build source detail
+    let sourceDetail = 'ASRG Advisory';
+    if (oem !== 'Generic') sourceDetail += ` · ${oem}`;
+    if (cveId) sourceDetail += ` · ${cveId}`;
 
-  const threats = unique.map(cert => {
-    const commonName = cert.common_name || cert.name_value || 'Unknown';
-    const issuer = cert.issuer_name || '';
-    const entryDate = cert.entry_timestamp || cert.not_before;
-    const oem = extractOEM(commonName + ' ' + cert._domain);
-    const threatId = generateId('ct', `${cert.id || commonName}`);
+    // Build link
+    const link = adv.slug ? `https://asrg.io/security-advisories/${adv.slug}` : 'https://asrg.io/security-advisories';
 
-    // Determine component based on subdomain
-    let component = 'PKI / Certificates';
-    const lower = commonName.toLowerCase();
-    if (/ota|update|firmware/i.test(lower)) component = 'OTA Infrastructure';
-    else if (/telematics|tcu/i.test(lower)) component = 'Telematics / TCU';
-    else if (/connected|vehicle|car/i.test(lower)) component = 'Connected Vehicle';
-    else if (/fleet/i.test(lower)) component = 'Fleet Management';
-    else if (/diagnostic|doip|uds/i.test(lower)) component = 'Diagnostics';
-    else if (/api/i.test(lower)) component = 'Cloud API';
-    else if (/v2x/i.test(lower)) component = 'V2X';
-
-    // Higher severity for sensitive subdomains
-    const isSensitive = autoSubdomains.test(commonName);
-    const severity = isSensitive ? 'medium' : 'low';
+    // Extract CWE ID
+    const cweMatch = problemType.match(/CWE-\d+/);
+    const cweId = cweMatch ? cweMatch[0] : '';
 
     return {
       id: threatId,
-      title: `CT Log: New certificate for ${sanitize(commonName)}`,
-      severity,
+      title: cveId ? `${cveId}: ${sanitize(title)}` : sanitize(title),
+      severity: sevLevel,
       oem,
       component,
-      techniques: ['ATM-T0017'],
-      source: 'CT Logs',
-      sourceDetail: `CT Monitor · ${sanitize(oem)}`,
-      confidence: isSensitive ? 80 : 65,
+      techniques,
+      source: 'ASRG',
+      sourceDetail,
+      confidence,
       sources: 1,
-      time: timeAgo(entryDate),
-      rawDate: new Date(entryDate),
-      link: `https://crt.sh/?id=${cert.id}`
+      time: publishedDate ? timeAgo(publishedDate) : 'Recent',
+      rawDate: publishedDate ? new Date(publishedDate) : new Date(),
+      link,
+      _subSource: 'asrg',
+      _classifyText: fullText,
+      // Extra fields for richer display
+      cveId,
+      cweId,
+      cvss31,
+      cvss40,
+      affectedProducts: sanitize(affectedProducts.substring(0, 200)),
+      problemType: sanitize(problemType),
+      credits: sanitize(credits.substring(0, 100))
     };
   });
 
   updateSourceStatus(sourceKey, 'active', threats.length);
+  console.log(`[CARTINT] ASRG: ${threats.length} automotive advisories loaded`);
   return threats;
 }
 
@@ -1561,200 +1483,6 @@ async function fetchCISA() {
   updateSourceStatus(sourceKey, 'active', allThreats.length);
   console.log(`[CARTINT] CISA total: ${allThreats.length} automotive-relevant advisories`);
   return allThreats;
-}
-
-// ---- MISP Feed (CIRCL OSINT / Botvrij.eu — automotive only) ----
-
-async function fetchMISP() {
-  const sourceKey = 'MISP';
-  updateSourceStatus(sourceKey, 'fetching');
-
-  // Only use real MISP feeds — no generic IoC fallbacks
-  const threats = await fetchMISPManifest();
-
-  if (!threats || threats.length === 0) {
-    console.warn('[CARTINT] MISP: No automotive-relevant events found (feeds may be CORS-blocked — run proxy.js)');
-    updateSourceStatus(sourceKey, 'error');
-    return [];
-  }
-
-  updateSourceStatus(sourceKey, 'active', threats.length);
-  console.log(`[CARTINT] MISP: ${threats.length} automotive threats generated`);
-  return threats;
-}
-
-async function fetchMISPManifest() {
-  let manifest = null;
-  let baseUrl = '';
-
-  const feeds = [
-    { url: CONFIG.misp.circlManifest, base: CONFIG.misp.circlBase, name: 'CIRCL' },
-    { url: CONFIG.misp.botvrijManifest, base: CONFIG.misp.botvrijBase, name: 'Botvrij' }
-  ];
-
-  // Try each feed using CORS proxy helper
-  for (const feed of feeds) {
-    try {
-      const resp = await corsFetch(feed.url);
-      manifest = await resp.json();
-      baseUrl = feed.base;
-      console.log(`[CARTINT] MISP: Loaded manifest from ${feed.name} (${Object.keys(manifest).length} events)`);
-      break;
-    } catch (e) {
-      console.warn(`[CARTINT] MISP ${feed.name} fetch failed:`, e.message);
-    }
-  }
-
-  if (!manifest) return null;
-
-  const events = Object.entries(manifest).map(([uuid, meta]) => ({
-    uuid,
-    info: meta.info || '',
-    date: meta.date || '',
-    threat_level_id: parseInt(meta.threat_level_id) || 4,
-    analysis: parseInt(meta.analysis) || 0,
-    timestamp: parseInt(meta.timestamp) || 0,
-    org: meta.Orgc?.name || 'Unknown',
-    tags: (meta.Tag || []).map(t => t.name)
-  }));
-
-  events.sort((a, b) => b.timestamp - a.timestamp);
-
-  // Strictly automotive tag patterns — must be unambiguously automotive
-  const autoTagPatterns = [
-    /automotive/i, /\bvehicle\b/i,
-    /can.bus/i, /\becu\b/i, /\bobd/i, /telematics/i,
-    /v2x/i, /autosar/i, /\bdoip\b/i, /\buds\b/i,
-    /sector.*automotive/i, /sector.*transport/i
-  ];
-
-  // OEM/supplier names — only match as whole tag values, not substrings
-  const autoOemTagPatterns = [
-    /^misp-galaxy:.*toyota/i, /^misp-galaxy:.*\bbmw\b/i,
-    /^misp-galaxy:.*\bford\b/i, /^misp-galaxy:.*mercedes/i,
-    /^misp-galaxy:.*volkswagen/i, /^misp-galaxy:.*tesla/i,
-    /^misp-galaxy:.*hyundai/i, /^misp-galaxy:.*\bkia\b/i,
-    /^misp-galaxy:.*nissan/i, /^misp-galaxy:.*honda/i,
-    /^misp-galaxy:.*stellantis/i, /^misp-galaxy:.*\bvolvo\b/i,
-    /^misp-galaxy:.*\bbosch\b/i, /^misp-galaxy:.*continental.*auto/i,
-    /^misp-galaxy:.*\bdenso\b/i, /^misp-galaxy:.*\baptiv\b/i
-  ];
-
-  // Known generic daily feeds to always skip
-  const genericFeedPatterns = [
-    /KRVTZ-NET/i, /Maltrail/i, /IDS\s+alerts?\s+for/i,
-    /Suricata/i, /EmergingThreats/i, /daily\s+(IOC|malware|report)/i,
-    /spam\s+campaign/i, /phishing\s+kit/i, /URLhaus/i
-  ];
-
-  // ONLY show events with explicit automotive/transport/vehicle tags — no classifier guessing
-  const automotiveEvents = events.filter(ev => {
-    const hasAutoTag = ev.tags.some(tag =>
-      autoTagPatterns.some(pat => pat.test(tag))
-    );
-    if (hasAutoTag) return true;
-
-    const hasOemTag = ev.tags.some(tag =>
-      autoOemTagPatterns.some(pat => pat.test(tag))
-    );
-    return hasOemTag;
-  });
-
-  console.log(`[CARTINT] MISP: ${automotiveEvents.length} automotive-relevant events out of ${events.length} total`);
-
-  const topEvents = automotiveEvents.slice(0, CONFIG.misp.maxEventDetails);
-  const enrichedEvents = [];
-
-  for (const ev of topEvents) {
-    try {
-      const resp = await corsFetch(`${baseUrl}${ev.uuid}.json`);
-      if (resp) {
-        const data = await resp.json();
-        const event = data.Event || data;
-        enrichedEvents.push({
-          ...ev,
-          attributeCount: (event.Attribute || []).length +
-            (event.Object || []).reduce((sum, obj) => sum + (obj.Attribute || []).length, 0),
-          fullTags: (event.Tag || []).map(t => t.name)
-        });
-      } else {
-        enrichedEvents.push(ev);
-      }
-      await new Promise(r => setTimeout(r, 300));
-    } catch (e) {
-      enrichedEvents.push(ev);
-    }
-  }
-
-  for (let i = CONFIG.misp.maxEventDetails; i < automotiveEvents.length; i++) {
-    enrichedEvents.push(automotiveEvents[i]);
-  }
-
-  return mispEventsToThreats(enrichedEvents);
-}
-
-
-function mispEventsToThreats(events) {
-  return events.map(ev => {
-    const severityMap = { 1: 'critical', 2: 'high', 3: 'medium', 4: 'low' };
-    const severity = severityMap[ev.threat_level_id] || 'medium';
-    const oem = extractOEM(ev.info);
-
-    let component = 'Vehicle Threat Intel';
-    const lowerInfo = ev.info.toLowerCase();
-    const tagStr = (ev.fullTags || ev.tags || []).join(' ').toLowerCase();
-    const combined = lowerInfo + ' ' + tagStr;
-    if (/can.bus|can.protocol|canbus/i.test(combined)) component = 'CAN Bus';
-    else if (/\becu\b|electronic.control/i.test(combined)) component = 'ECU';
-    else if (/\bobd|on.board.diag/i.test(combined)) component = 'OBD-II';
-    else if (/telematics|tcu|connected.car/i.test(combined)) component = 'Telematics / TCU';
-    else if (/infotainment|ivi\b|head.unit/i.test(combined)) component = 'Infotainment';
-    else if (/v2x|vehicle.to|dsrc|c-its/i.test(combined)) component = 'V2X';
-    else if (/autosar|secoc/i.test(combined)) component = 'AUTOSAR';
-    else if (/\bdoip\b|diag.*ip/i.test(combined)) component = 'DoIP';
-    else if (/\buds\b|unified.diag/i.test(combined)) component = 'UDS';
-    else if (/firmware|update|ota\b/i.test(combined)) component = 'Firmware / OTA';
-    else if (/ransomware|ransom/i.test(combined)) component = 'Ransomware Campaign';
-    else if (/apt|threat.actor|campaign/i.test(combined)) component = 'APT Campaign';
-    else if (/vuln|cve|exploit/i.test(combined)) component = 'Vulnerability';
-    else if (/supply.chain/i.test(combined)) component = 'Supply Chain';
-    else if (/key.fob|immobilizer|keyless/i.test(combined)) component = 'Keyless Entry';
-    else if (/bluetooth|ble\b|wifi|wireless/i.test(combined)) component = 'Wireless Interface';
-
-    const techniques = [];
-    const techText = lowerInfo + ' ' + tagStr;
-    for (const [keyword, techs] of Object.entries(ATM_TECHNIQUE_MAP)) {
-      if (techText.includes(keyword.toLowerCase())) {
-        for (const t of techs) {
-          if (!techniques.includes(t)) techniques.push(t);
-        }
-      }
-    }
-    if (techniques.length === 0) techniques.push('ATM-T0059');
-
-    let iocSummary = '';
-    if (ev.attributeCount) iocSummary = ` · ${ev.attributeCount} IoCs`;
-
-    const analysisMap = { 0: 'Initial', 1: 'Ongoing', 2: 'Completed' };
-    const analysisStatus = analysisMap[ev.analysis] || '';
-
-    return {
-      id: generateId('misp', ev.uuid),
-      title: `MISP: ${sanitize(ev.info)}`,
-      severity,
-      oem,
-      component,
-      techniques,
-      source: 'MISP',
-      sourceDetail: `MISP · ${sanitize(ev.org)}${iocSummary}`,
-      confidence: ev.analysis === 2 ? 90 : ev.analysis === 1 ? 75 : 60,
-      sources: 1,
-      time: ev.date ? timeAgo(ev.date) : 'Unknown',
-      rawDate: ev.timestamp ? new Date(ev.timestamp * 1000) : new Date(0),
-      link: `https://www.circl.lu/doc/misp/feed-osint/${ev.uuid}.json`,
-      details: `${analysisStatus ? `Analysis: ${analysisStatus} · ` : ''}Tags: ${(ev.fullTags || ev.tags || []).slice(0, 5).map(t => sanitize(t)).join(', ') || 'none'}`
-    };
-  });
 }
 
 // ---- Ransomware.live (Dark Web Intelligence) ----
@@ -2388,7 +2116,7 @@ function updateStatCards() {
   renderDataSources();
 
   const criticalHighCount = state.threats.filter(t => t.severity === 'critical' || t.severity === 'high').length;
-  const ctCount = counts['CT Logs'] || 0;
+  const ctCount = counts['ASRG'] || 0;
   const githubCount = counts['GitHub'] || 0;
   const darkWebCount = counts['Dark Web'] || 0;
   const firmwareCount = counts['Firmware Repos'] || 0;
@@ -2504,7 +2232,7 @@ function renderThreatFeed(fullRefresh = false) {
           <span class="streaming-dot"></span>
           <span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.8rem;">Fetching live threat data from sources...</span>
         </div>
-        <div style="color: var(--text-muted); font-size: 0.75rem;">Querying Ahmia Dark Web, Paste Dumps, Ransomware.live, NVD, GitHub, ExploitDB, crt.sh, CISA, MISP</div>
+        <div style="color: var(--text-muted); font-size: 0.75rem;">Querying ASRG, Ahmia Dark Web, Paste Dumps, Ransomware.live, NVD, GitHub, CISA KEV, CSAF</div>
       </div>
     `;
     return;
@@ -2642,9 +2370,8 @@ function renderDataSources() {
     { name: 'Dark Web', color: '#e63946' },
     { name: 'GitHub', color: '#2ec4b6' },
     { name: 'NVD/CVE', color: '#f77f00' },
-    { name: 'CT Logs', color: '#2ec4b6' },
-    { name: 'ExploitDB', color: '#e63946' },
-    { name: 'MISP', color: '#f77f00' },
+    { name: 'ASRG', color: '#7b2cbf' },
+    { name: 'CISA KEV', color: '#4895ef' },
     { name: 'Firmware Repos', color: '#2ec4b6' }
   ];
 
@@ -2727,12 +2454,11 @@ function setSourceFilter(sourceName) {
 // Map source display names to their fetch functions and status keys
 const SOURCE_FETCH_MAP = [
   { name: 'Dark Web', statusName: 'Dark Web', fetchFn: () => fetchDarkWebThreats(), label: 'Dark Web (Ahmia + Pastes + Ransomware)' },
+  { name: 'ASRG', statusName: 'ASRG', fetchFn: () => fetchASRG(), label: 'ASRG' },
   { name: 'NVD/CVE', statusName: 'NVD/CVE', fetchFn: () => fetchNVD(), label: 'NVD' },
   { name: 'GitHub', statusName: 'GitHub', fetchFn: () => fetchGitHubLeaks(), label: 'GitHub' },
-  { name: 'ExploitDB', statusName: 'ExploitDB', fetchFn: () => fetchExploitDB(), label: 'ExploitDB' },
-  { name: 'CT Logs', statusName: 'CT Logs', fetchFn: () => fetchCTLogs(), label: 'CT Logs' },
-  { name: 'Firmware Repos', statusName: 'Firmware Repos', fetchFn: () => fetchCISA(), label: 'CISA' },
-  { name: 'MISP', statusName: 'MISP', fetchFn: () => fetchMISP(), label: 'MISP' }
+  { name: 'CISA KEV', statusName: 'CISA KEV', fetchFn: () => fetchCISA(), label: 'CISA' },
+  { name: 'Firmware Repos', statusName: 'Firmware Repos', fetchFn: () => fetchCISA(), label: 'CISA CSAF' }
 ];
 
 async function fetchAllSources(forceRefresh = false) {
@@ -2874,7 +2600,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (refreshBtn) {
     refreshBtn.addEventListener('click', async () => {
       refreshBtn.classList.add('spin');
-      const liveSources = ['Dark Web', 'GitHub', 'NVD/CVE', 'CT Logs', 'ExploitDB', 'MISP', 'Firmware Repos'];
+      const liveSources = ['Dark Web', 'ASRG', 'GitHub', 'NVD/CVE', 'CISA KEV', 'Firmware Repos'];
       liveSources.forEach(name => updateSourceStatus(name, 'fetching'));
       renderDataSources();
       await fetchAllSources(true); // force refresh all
@@ -2890,7 +2616,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (hadCache) {
     // Immediately show cached data — no loading skeleton
     const timestamps = getCacheTimestamps();
-    const liveSources = ['Dark Web', 'GitHub', 'NVD/CVE', 'CT Logs', 'ExploitDB', 'MISP', 'Firmware Repos'];
+    const liveSources = ['Dark Web', 'ASRG', 'GitHub', 'NVD/CVE', 'CISA KEV', 'Firmware Repos'];
     liveSources.forEach(name => {
       const count = state.threats.filter(t => t.source === name).length;
       updateSourceStatus(name, count > 0 ? 'active' : 'error', count);
@@ -2908,7 +2634,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await fetchAllSources(false);
   } else {
     // No cache — full fresh fetch
-    const liveSources = ['Dark Web', 'GitHub', 'NVD/CVE', 'CT Logs', 'ExploitDB', 'MISP', 'Firmware Repos'];
+    const liveSources = ['Dark Web', 'ASRG', 'GitHub', 'NVD/CVE', 'CISA KEV', 'Firmware Repos'];
     liveSources.forEach(name => updateSourceStatus(name, 'fetching'));
     renderDataSources();
     await fetchAllSources(false);
@@ -2916,10 +2642,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Start polling loops for live updates
   pollSource(fetchDarkWebThreats, 'Dark Web (Ahmia + Pastes + Ransomware)', CONFIG.darkweb.pollInterval);
+  pollSource(fetchASRG, 'ASRG', CONFIG.asrg.pollInterval);
   pollSource(fetchNVD, 'NVD', CONFIG.nvd.pollInterval);
   pollSource(fetchGitHubLeaks, 'GitHub', CONFIG.github.pollInterval);
-  pollSource(fetchExploitDB, 'ExploitDB', CONFIG.exploitdb.pollInterval);
-  pollSource(fetchCTLogs, 'CT Logs', CONFIG.crtsh.pollInterval);
-  pollSource(fetchCISA, 'CISA', CONFIG.cisa.pollInterval);
-  pollSource(fetchMISP, 'MISP', CONFIG.misp.pollInterval);
+  pollSource(fetchCISA, 'CISA/Firmware', CONFIG.cisa.pollInterval);
 });

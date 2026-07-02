@@ -94,7 +94,7 @@ function getQueryConfig() {
 function stripHtml(html) { return (html || '').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"); }
 
 // Source name mapping between dashboard source names and intel page checkbox labels
-const SOURCE_MAP = { 'NVD/CVE': 'NVD/CVE', 'GitHub': 'GitHub', 'ExploitDB': 'ExploitDB', 'CT Logs': 'CT Logs', 'Firmware Repos': 'Firmware Repos', 'MISP': 'MISP', 'Dark Web': 'Dark Web' };
+const SOURCE_MAP = { 'NVD/CVE': 'NVD/CVE', 'GitHub': 'GitHub', 'ASRG': 'ASRG', 'CISA KEV': 'CISA KEV', 'Firmware Repos': 'Firmware Repos', 'Dark Web': 'Dark Web' };
 
 function searchLiveFeed(target, config) {
   const query = target.toLowerCase();
@@ -199,7 +199,7 @@ function buildReportData(config) {
   data.priority = critCount >= 3 ? 'Critical' : (critCount + highCount) >= 3 ? 'High' : search.matched.length > 0 ? 'Moderate' : 'Low';
 
   // Source reliability (Admiralty Scale)
-  const reliabilityMap = { 'NVD/CVE': 'A1', 'CT Logs': 'A2', 'ExploitDB': 'B2', 'GitHub': 'B3', 'MISP': 'B2', 'Firmware Repos': 'C3', 'Dark Web': 'D3' };
+  const reliabilityMap = { 'NVD/CVE': 'A1', 'ASRG': 'A1', 'CISA KEV': 'A2', 'GitHub': 'B3', 'Firmware Repos': 'B2', 'Dark Web': 'D3' };
   const activeSources = Object.keys(search.bySource);
   data.sourceReliability = activeSources.map(s => reliabilityMap[s] || 'C3').sort()[0] || 'C3';
   data.sensitivity = 'TLP:AMBER';
@@ -272,8 +272,8 @@ function buildReportData(config) {
       : (search.matched.length > 0 ? 'Unattributed — threat indicators observed in live feeds' : 'No threat actors identified in live feed for this target'),
     capability: data.techniqueTable.slice(0, 4).map(t => t.id + ': ' + t.name).join('; ') || 'No ATM techniques mapped',
     infrastructure: (() => {
-      const ctThreats = (search.bySource['CT Logs'] || []).slice(0, 3).map(t => t.title).join('; ');
-      return ctThreats || 'No infrastructure indicators observed in live feed';
+      const asrgThreats = (search.bySource['ASRG'] || []).slice(0, 3).map(t => t.title).join('; ');
+      return asrgThreats || 'No infrastructure indicators observed in live feed';
     })(),
     victim: `${target} (Automotive Sector)`
   };
@@ -622,7 +622,7 @@ function renderRawReport(config, data) {
       <thead><tr><th>SOURCE</th><th>EVENTS</th><th>AVG_CONFIDENCE</th><th>ADMIRALTY</th></tr></thead>
       <tbody>
         ${data.sourceConfidence.map(s => {
-          const admCode = { 'NVD/CVE': 'A1', 'CT Logs': 'A2', 'ExploitDB': 'B2', 'GitHub': 'B3', 'MISP': 'B2', 'Firmware Repos': 'C3', 'Dark Web': 'D3' }[s.name] || 'F6';
+          const admCode = { 'NVD/CVE': 'A1', 'ASRG': 'A1', 'CISA KEV': 'A2', 'GitHub': 'B3', 'Firmware Repos': 'B2', 'Dark Web': 'D3' }[s.name] || 'F6';
           return `<tr>
             <td class="rpt-raw-mono">${escHtml(s.name)}</td>
             <td class="rpt-raw-mono">${s.count}</td>
@@ -1262,7 +1262,7 @@ async function exportRawDocx(D, data, config, h) {
     rows: [
       new D.TableRow({ children: [headerCell('Source', 2800), headerCell('Events', 1600), headerCell('Avg Conf', 1600), headerCell('Admiralty', 1600)] }),
       ...data.sourceConfidence.map(s => {
-        const admCode = { 'NVD/CVE': 'A1', 'CT Logs': 'A2', 'ExploitDB': 'B2', 'GitHub': 'B3', 'MISP': 'B2', 'Firmware Repos': 'C3', 'Dark Web': 'D3' }[s.name] || 'F6';
+        const admCode = { 'NVD/CVE': 'A1', 'ASRG': 'A1', 'CISA KEV': 'A2', 'GitHub': 'B3', 'Firmware Repos': 'B2', 'Dark Web': 'D3' }[s.name] || 'F6';
         return new D.TableRow({
           children: [
             dataCell(s.name, { mono: true, size: 15, width: 2800 }),
@@ -1846,7 +1846,7 @@ document.getElementById('inputTarget').addEventListener('input', updateStepCheck
 
 function buildGenerationSteps(config) {
   const steps = [{ text: 'Initializing CARTINT query pipeline...', type: 'info', delay: 400 }];
-  const sourceSteps = { 'NVD/CVE': 'NVD NIST database', 'GitHub': 'GitHub code search API', 'Dark Web': 'Ahmia dark web + paste dumps + ransomware.live', 'CT Logs': 'crt.sh certificate transparency', 'ExploitDB': 'ExploitDB', 'MISP': 'MISP threat feeds', 'Firmware Repos': 'firmware repository mirrors' };
+  const sourceSteps = { 'NVD/CVE': 'NVD NIST database', 'GitHub': 'GitHub code search API', 'Dark Web': 'Ahmia dark web + paste dumps + ransomware.live', 'ASRG': 'ASRG automotive security advisories', 'CISA KEV': 'CISA Known Exploited Vulnerabilities', 'Firmware Repos': 'CISA CSAF ICS/OT advisories' };
   config.sources.forEach(s => {
     if (sourceSteps[s]) { steps.push({ text: `Querying ${sourceSteps[s]}...`, type: 'info', delay: 500 + Math.random() * 500 }); steps.push({ text: `${s} scan complete`, type: 'ok', delay: 200 + Math.random() * 200 }); }
   });
