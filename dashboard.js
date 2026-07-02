@@ -122,6 +122,61 @@ const CONFIG = {
     fetchTimeout: 30000,
     pollInterval: 300000 // 5 min
   },
+  darkweb: {
+    // Ahmia dark web search — indexes .onion sites, accessible via clearweb
+    ahmiaQueries: [
+      'automotive ECU exploit',
+      'CAN bus hack tool',
+      'vehicle telematics credentials',
+      'OBD2 diagnostic hack',
+      'car firmware dump',
+      'connected car vulnerability',
+      'vehicle API key leak',
+      'fleet management breach',
+      'immobilizer bypass tool',
+      'V2X security exploit',
+      'AUTOSAR vulnerability',
+      'infotainment system hack',
+      'OTA update exploit',
+      'key fob relay attack',
+      'ransomware automotive dealer',
+      'car dealership data breach',
+      'auto parts supplier leak',
+      'vehicle data breach',
+      'ECU firmware dump',
+      'car hacking tools',
+      'telematics unit hack',
+      'vehicle tracking exploit',
+      'connected vehicle attack',
+      'automotive credential leak',
+      'OEM supplier ransomware'
+    ],
+    queryIndex: 0,
+    queriesPerPoll: 4,
+    // Paste site search queries
+    pasteQueries: [
+      'automotive API key',
+      'telematics password',
+      'CAN bus exploit',
+      'OBD2 secret',
+      'vehicle API token',
+      'ECU firmware key',
+      'fleet management credentials',
+      'AUTOSAR config secret',
+      'immobilizer bypass code',
+      'OTA server automotive token',
+      'V2X certificate private',
+      'DoIP diagnostic key',
+      'SecOC key automotive',
+      'HSM bypass vehicle'
+    ],
+    pasteQueryIndex: 0,
+    pasteQueriesPerPoll: 3,
+    // Ransomware group detail fetch
+    groupDetailInterval: 6, // every 6th poll cycle, fetch group details
+    pollCount: 0,
+    pollInterval: 300000 // 5 min
+  },
   misp: {
     // CIRCL OSINT Feed — curated threat intel events (no auth)
     circlManifest: 'https://www.circl.lu/doc/misp/feed-osint/manifest.json',
@@ -339,6 +394,21 @@ const AUTO_CLASSIFIER = {
     /\.workers\.dev/i,
     /\.ngrok\.io/i,
     /\.pagekite\.me/i,
+    // Dark-web-specific false positives (non-automotive dark web content)
+    /\bauto\s+(mat|matic|responder|click|dial|complete|start|stop|login|submit)\b/i,
+    /\bdrug\s+dealer\b/i,
+    /\bdealer\s+(market|forum|network|zone)\b/i,
+    /\bcredit\s+card\s+dump\b/i,
+    /\bcarding\s+(forum|site|market|tutorial)\b/i,
+    /\b(dating|escort|gambling|casino|poker)\b/i,
+    /\b(counterfeit\s+(money|id|passport|bill))\b/i,
+    /\b(weapon|gun\s+sale|ammo\s+sale|firearm)\b/i,
+    /\b(hitman|murder\s+for\s+hire)\b/i,
+    /\b(porn|adult|xxx|cam\s+girl)\b/i,
+    /\b(bitcoin|monero|crypto\s+(mixer|tumbler|exchange|wallet))\b/i,
+    /\b(stolen\s+(passport|id|license|ssn))\b/i,
+    // Generic dark web marketplace terms that aren't automotive
+    /\b(buy\s+cheap|wholesale|free\s+shipping|discount\s+code)\b/i,
     // Generic MISP daily feeds that are never automotive-specific
     /\bKRVTZ-NET\b/i,
     /\bMaltrail\s+IOC\b/i,
@@ -617,7 +687,7 @@ const state = {
 // ---- Cache Infrastructure ----
 // Per-source cache TTLs (how long before re-fetching from each source)
 const SOURCE_CACHE_TTL = {
-  'Dark Web':       3 * 60 * 60 * 1000,  // 3 hours
+  'Dark Web':       2 * 60 * 60 * 1000,  // 2 hours (Ahmia + pastes + ransomware.live)
   'NVD/CVE':        1 * 60 * 60 * 1000,  // 1 hour
   'GitHub':         30 * 60 * 1000,       // 30 min
   'ExploitDB':      1 * 60 * 60 * 1000,  // 1 hour
@@ -1813,6 +1883,408 @@ async function fetchRansomwareLive() {
   return threats;
 }
 
+// ---- Ahmia Dark Web Search ----
+// Searches Ahmia.fi (indexes .onion content) for automotive threats
+// Uses local proxy if available, falls back to CORS proxies
+
+function parseAhmiaHTML(html) {
+  const results = [];
+  const seen = new Set();
+
+  // Extract .onion URLs with surrounding context
+  const onionRegex = /https?:\/\/([a-z0-9]{16,56}\.onion)[^\s"'<>)\]]*/gi;
+  let match;
+
+  while ((match = onionRegex.exec(html)) !== null) {
+    const url = match[0].replace(/[.,;!?]$/, '');
+    const onion = match[1];
+    if (seen.has(onion)) continue;
+    seen.add(onion);
+
+    const start = Math.max(0, match.index - 300);
+    const end = Math.min(html.length, match.index + url.length + 300);
+    const rawContext = html.substring(start, end);
+
+    const context = rawContext
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const beforeText = context.substring(0, Math.max(0, match.index - start)).trim();
+    const afterText = context.substring(match.index - start + url.length).trim();
+
+    let title = '';
+    if (beforeText.length > 5) {
+      title = beforeText.substring(0, 120);
+    } else if (afterText.length > 5) {
+      title = afterText.substring(0, 120);
+    } else {
+      title = onion;
+    }
+
+    results.push({
+      url,
+      title: title.trim(),
+      description: context.substring(0, 400)
+    });
+  }
+
+  return results;
+}
+
+async function fetchAhmiaDarkWeb() {
+  const queries = CONFIG.darkweb.ahmiaQueries;
+  const n = CONFIG.darkweb.queriesPerPoll;
+  const start = CONFIG.darkweb.queryIndex;
+
+  const batch = [];
+  for (let i = 0; i < n; i++) {
+    batch.push(queries[(start + i) % queries.length]);
+  }
+  CONFIG.darkweb.queryIndex = (start + n) % queries.length;
+
+  const allResults = [];
+
+  for (const query of batch) {
+    try {
+      let results = null;
+
+      // Try local proxy API first (returns parsed JSON)
+      try {
+        const resp = await fetch(`http://localhost:3001/api/ahmia-search?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(30000) });
+        if (resp.ok) {
+          const data = await resp.json();
+          results = data.results || [];
+        }
+      } catch (e) { /* proxy not available, try CORS */ }
+
+      // Fallback: fetch Ahmia HTML via CORS proxy and parse client-side
+      if (!results) {
+        const ahmiaUrl = `https://ahmia.fi/search/?q=${encodeURIComponent(query)}`;
+        const corsUrl = `https://corsproxy.io/?${encodeURIComponent(ahmiaUrl)}`;
+        try {
+          const resp = await fetch(corsUrl, { signal: AbortSignal.timeout(20000) });
+          if (resp.ok) {
+            const html = await resp.text();
+            results = parseAhmiaHTML(html);
+          }
+        } catch (e2) { /* try next query */ }
+      }
+
+      if (results && results.length > 0) {
+        allResults.push(...results.map(r => ({ ...r, _query: query })));
+      }
+
+      // Rate limit between queries
+      await new Promise(resolve => setTimeout(resolve, 2500));
+    } catch (e) {
+      console.warn(`[CARTINT] Ahmia search failed for "${query}":`, e.message);
+    }
+  }
+
+  // Filter through automotive classifier — stricter for dark web content
+  const relevant = allResults.filter(r => {
+    const text = `${r.title || ''} ${r.description || ''} ${r.url || ''}`;
+    const result = classifyAutomotiveRelevance(text, r._query || '');
+    if (result.rejected) return false;
+    // Higher threshold for dark web results (require score >= 8)
+    // to reduce false positives from dark web marketplace listings
+    return result.score >= 8;
+  });
+
+  const threats = relevant.map(r => {
+    const fullText = `${r.title} ${r.description} ${r._query}`;
+    const techniques = extractTechniques(fullText);
+    const component = extractComponent(fullText);
+    const oem = extractOEM(fullText);
+    const threatId = generateId('ahmia', r.url || r.title);
+
+    // Determine severity from content
+    let severity = 'medium';
+    const lowerDesc = (r.description || '').toLowerCase();
+    if (/exploit|vulnerability|breach|leak|dump|ransomware/i.test(lowerDesc)) severity = 'high';
+    if (/credential|password|api.?key|secret|token|private.?key/i.test(lowerDesc)) severity = 'critical';
+    if (/bypass|unlock|immobilizer|backdoor/i.test(lowerDesc)) severity = 'critical';
+
+    return {
+      id: threatId,
+      title: `Dark Web: ${sanitize(r.title || r.url)}`,
+      severity,
+      oem,
+      component,
+      techniques,
+      source: 'Dark Web',
+      sourceDetail: `Ahmia Dark Web Search · "${sanitize(r._query)}"`,
+      confidence: 70,
+      sources: 1,
+      time: 'Recent',
+      rawDate: new Date(),
+      link: r.url || '#',
+      _subSource: 'ahmia',
+      _classifyText: `${r.title} ${r.description}`
+    };
+  });
+
+  console.log(`[CARTINT] Ahmia: ${threats.length} automotive results from ${allResults.length} total dark web hits`);
+  return threats;
+}
+
+// ---- Paste Site Monitoring ----
+// Searches paste sites (psbdmp.ws) for automotive credential/code leaks
+
+async function fetchDarkWebPastes() {
+  const queries = CONFIG.darkweb.pasteQueries;
+  const n = CONFIG.darkweb.pasteQueriesPerPoll;
+  const start = CONFIG.darkweb.pasteQueryIndex;
+
+  const batch = [];
+  for (let i = 0; i < n; i++) {
+    batch.push(queries[(start + i) % queries.length]);
+  }
+  CONFIG.darkweb.pasteQueryIndex = (start + n) % queries.length;
+
+  const allResults = [];
+
+  for (const query of batch) {
+    try {
+      let results = null;
+
+      // Try local proxy API first
+      try {
+        const resp = await fetch(`http://localhost:3001/api/paste-search?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(15000) });
+        if (resp.ok) {
+          const data = await resp.json();
+          results = data.results || [];
+        }
+      } catch (e) { /* proxy not available */ }
+
+      // Fallback: CORS proxy to psbdmp.ws API
+      if (!results) {
+        const apiUrl = `https://psbdmp.ws/api/search/${encodeURIComponent(query)}`;
+        const corsUrl = `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`;
+        try {
+          const resp = await fetch(corsUrl, { signal: AbortSignal.timeout(15000) });
+          if (resp.ok) {
+            results = await resp.json();
+            if (!Array.isArray(results)) results = [];
+          }
+        } catch (e2) { /* try next */ }
+      }
+
+      if (results && results.length > 0) {
+        allResults.push(...results.slice(0, 10).map(r => ({ ...r, _query: query })));
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    } catch (e) {
+      console.warn(`[CARTINT] Paste search failed for "${query}":`, e.message);
+    }
+  }
+
+  // Filter through automotive classifier
+  const relevant = allResults.filter(r => {
+    const text = `${r.content || ''} ${r._query}`;
+    return isAutomotiveRelevant(text);
+  });
+
+  const threats = relevant.map(r => {
+    const content = (r.content || '').substring(0, 500);
+    const fullText = `${content} ${r._query}`;
+    const techniques = extractTechniques(fullText);
+    const component = extractComponent(fullText);
+    const oem = extractOEM(fullText);
+    const threatId = generateId('paste', r.id || content.substring(0, 50));
+
+    let severity = 'high';
+    if (/password|secret|token|private.?key|credential/i.test(content)) severity = 'critical';
+    else if (/api.?key|api.?token/i.test(content)) severity = 'critical';
+    else if (/exploit|attack|bypass/i.test(content)) severity = 'high';
+
+    return {
+      id: threatId,
+      title: `Paste leak: ${sanitize(content.substring(0, 100))}${content.length > 100 ? '...' : ''}`,
+      severity,
+      oem,
+      component,
+      techniques,
+      source: 'Dark Web',
+      sourceDetail: `Paste Dump · "${sanitize(r._query)}"`,
+      confidence: 80,
+      sources: 1,
+      time: r.time ? timeAgo(r.time) : 'Recent',
+      rawDate: r.time ? new Date(r.time) : new Date(),
+      link: r.id ? `https://psbdmp.ws/${r.id}` : '#',
+      _subSource: 'paste',
+      _classifyText: content
+    };
+  });
+
+  console.log(`[CARTINT] Pastes: ${threats.length} automotive results from ${allResults.length} total pastes`);
+  return threats;
+}
+
+// ---- Ransomware Group Details (Enhanced) ----
+// Fetches group-specific data from ransomware.live for deeper context
+
+async function fetchRansomwareGroupDetails() {
+  const groupsUrl = CONFIG.ransomwarelive.groupsUrl;
+  let groups = [];
+
+  try {
+    const resp = await corsFetch(groupsUrl, { timeout: 20000 });
+    if (resp) {
+      const data = await resp.json();
+      groups = Array.isArray(data) ? data : (data && Array.isArray(data.groups) ? data.groups : []);
+    }
+  } catch (e) {
+    console.warn('[CARTINT] Ransomware groups fetch failed:', e.message);
+    return [];
+  }
+
+  // Filter groups that have automotive-related victims
+  const autoGroupThreats = [];
+
+  for (const group of groups.slice(0, 50)) { // Limit to avoid rate limits
+    try {
+      const groupName = group.name || group.group || '';
+      if (!groupName) continue;
+
+      // Fetch group-specific victims
+      const groupUrl = `https://api.ransomware.live/v2/group/${encodeURIComponent(groupName)}`;
+      const resp = await corsFetch(groupUrl, { timeout: 15000 });
+      if (!resp) continue;
+      const data = await resp.json();
+      const victims = Array.isArray(data) ? data : (data && Array.isArray(data.victims) ? data.victims : []);
+
+      // Filter for automotive victims
+      const autoVictims = victims.filter(v => {
+        const text = `${v.victim || v.post_title || ''} ${v.domain || ''} ${v.description || ''} ${v.activity || ''}`;
+        return isAutomotiveRelevant(text, groupName);
+      });
+
+      for (const v of autoVictims.slice(0, 5)) { // Max 5 per group
+        const victimName = v.victim || v.post_title || v.domain || 'Unknown';
+        const discovered = v.discovered || v.attackdate || '';
+        const threatId = generateId('rwgroup', `${groupName}-${victimName}`);
+
+        autoGroupThreats.push({
+          id: threatId,
+          title: `Ransomware group "${sanitize(groupName)}" claims automotive victim: ${sanitize(victimName)}`,
+          severity: 'critical',
+          oem: extractOEM(`${victimName} ${v.description || ''}`),
+          component: 'Supply Chain',
+          techniques: ['ATM-T0059', 'ATM-T0040', 'ATM-T0076'],
+          source: 'Dark Web',
+          sourceDetail: `Ransomware.live · Group: ${sanitize(groupName)} · ${v.country || 'Unknown'}`,
+          confidence: 88,
+          sources: 1,
+          time: discovered ? timeAgo(discovered) : 'Unknown',
+          rawDate: discovered ? new Date(discovered) : new Date(0),
+          link: v.permalink || v.url || `https://www.ransomware.live/#/group/${encodeURIComponent(groupName)}`,
+          groupName,
+          _subSource: 'ransomware-group',
+          _classifyText: `${victimName} ${v.description || ''} ${groupName}`
+        });
+      }
+
+      // Rate limit between group fetches
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    } catch (e) {
+      // Skip this group on error
+    }
+  }
+
+  console.log(`[CARTINT] Ransomware groups: ${autoGroupThreats.length} automotive victims across ${groups.length} groups`);
+  return autoGroupThreats;
+}
+
+// ---- Multi-Source Corroboration ----
+// Boosts confidence for threats confirmed by multiple dark web sub-sources
+
+function corroborateDarkWebThreats(threats) {
+  const groups = {};
+
+  for (const t of threats) {
+    // Create a normalized key for matching similar threats
+    const baseText = (t._classifyText || t.title || '').toLowerCase();
+    // Extract key entity name (first significant word)
+    const keyMatch = baseText.match(/([a-z]{3,})/g);
+    const key = keyMatch ? keyMatch.sort((a, b) => b.length - a.length)[0] : baseText.substring(0, 20);
+
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(t);
+  }
+
+  // Boost confidence for threats confirmed by multiple sub-sources
+  for (const [key, group] of Object.entries(groups)) {
+    if (group.length > 1) {
+      const subSources = new Set(group.map(t => t._subSource || 'ransomware'));
+      if (subSources.size > 1) {
+ // Only boost if different sub-sources
+        const corroborationBoost = (subSources.size - 1) * 8;
+        for (const t of group) {
+          t.confidence = Math.min(98, t.confidence + corroborationBoost);
+          t.sources = subSources.size;
+          t.sourceDetail = t.sourceDetail + ` · corroborated by ${subSources.size} sources`;
+        }
+      }
+    }
+  }
+
+  return threats;
+}
+
+// ---- Unified Dark Web Threat Fetcher ----
+// Combines: ransomware.live + Ahmia dark web search + paste monitoring + group details
+
+async function fetchDarkWebThreats() {
+  const sourceKey = 'Dark Web';
+  updateSourceStatus(sourceKey, 'fetching');
+
+  CONFIG.darkweb.pollCount = (CONFIG.darkweb.pollCount || 0) + 1;
+
+  // Fetch from all dark web sub-sources concurrently
+  const fetchPromises = [
+    fetchRansomwareLive(),
+    fetchAhmiaDarkWeb(),
+    fetchDarkWebPastes()
+  ];
+
+  // Fetch group details every Nth poll (expensive — many API calls)
+  if (CONFIG.darkweb.pollCount % CONFIG.darkweb.groupDetailInterval === 0) {
+    fetchPromises.push(fetchRansomwareGroupDetails());
+  }
+
+  const results = await Promise.allSettled(fetchPromises);
+
+  const allThreats = [];
+  const subCounts = {};
+
+  for (const result of results) {
+    if (result.status === 'fulfilled' && result.value) {
+      for (const t of result.value) {
+        const sub = t._subSource || 'ransomware';
+        subCounts[sub] = (subCounts[sub] || 0) + 1;
+        allThreats.push(t);
+      }
+    }
+  }
+
+  // Apply multi-source corroboration
+  corroborateDarkWebThreats(allThreats);
+
+  const activeCount = allThreats.length;
+  updateSourceStatus(sourceKey, 'active', activeCount);
+
+  console.log(`[CARTINT] Dark Web (combined): ${activeCount} threats — ${JSON.stringify(subCounts)}`);
+  return allThreats;
+}
+
 // ---- Fetch Status Bar ----
 
 function updateFetchStatus(message, type = '') {
@@ -2024,6 +2496,7 @@ function renderThreatFeed(fullRefresh = false) {
   }
 
   // Show loading state if no threats yet
+  // Update loading text to show new dark web sources
   if (state.threats.length === 0 && feed.children.length === 0) {
     feed.innerHTML = `
       <div class="threat-item" style="text-align: center; padding: 40px 20px;">
@@ -2031,7 +2504,7 @@ function renderThreatFeed(fullRefresh = false) {
           <span class="streaming-dot"></span>
           <span style="color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.8rem;">Fetching live threat data from sources...</span>
         </div>
-        <div style="color: var(--text-muted); font-size: 0.75rem;">Querying Ransomware.live, NVD, GitHub, ExploitDB, crt.sh, CISA, MISP</div>
+        <div style="color: var(--text-muted); font-size: 0.75rem;">Querying Ahmia Dark Web, Paste Dumps, Ransomware.live, NVD, GitHub, ExploitDB, crt.sh, CISA, MISP</div>
       </div>
     `;
     return;
@@ -2253,7 +2726,7 @@ function setSourceFilter(sourceName) {
 
 // Map source display names to their fetch functions and status keys
 const SOURCE_FETCH_MAP = [
-  { name: 'Dark Web', statusName: 'Dark Web', fetchFn: () => fetchRansomwareLive(), label: 'Ransomware.live' },
+  { name: 'Dark Web', statusName: 'Dark Web', fetchFn: () => fetchDarkWebThreats(), label: 'Dark Web (Ahmia + Pastes + Ransomware)' },
   { name: 'NVD/CVE', statusName: 'NVD/CVE', fetchFn: () => fetchNVD(), label: 'NVD' },
   { name: 'GitHub', statusName: 'GitHub', fetchFn: () => fetchGitHubLeaks(), label: 'GitHub' },
   { name: 'ExploitDB', statusName: 'ExploitDB', fetchFn: () => fetchExploitDB(), label: 'ExploitDB' },
@@ -2442,7 +2915,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Start polling loops for live updates
-  pollSource(fetchRansomwareLive, 'Ransomware.live', CONFIG.ransomwarelive.pollInterval);
+  pollSource(fetchDarkWebThreats, 'Dark Web (Ahmia + Pastes + Ransomware)', CONFIG.darkweb.pollInterval);
   pollSource(fetchNVD, 'NVD', CONFIG.nvd.pollInterval);
   pollSource(fetchGitHubLeaks, 'GitHub', CONFIG.github.pollInterval);
   pollSource(fetchExploitDB, 'ExploitDB', CONFIG.exploitdb.pollInterval);

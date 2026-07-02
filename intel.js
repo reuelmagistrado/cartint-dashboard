@@ -1846,7 +1846,7 @@ document.getElementById('inputTarget').addEventListener('input', updateStepCheck
 
 function buildGenerationSteps(config) {
   const steps = [{ text: 'Initializing CARTINT query pipeline...', type: 'info', delay: 400 }];
-  const sourceSteps = { 'NVD/CVE': 'NVD NIST database', 'GitHub': 'GitHub code search API', 'Dark Web': 'ransomware.live Pro API', 'CT Logs': 'crt.sh certificate transparency', 'ExploitDB': 'ExploitDB', 'MISP': 'MISP threat feeds', 'Firmware Repos': 'firmware repository mirrors' };
+  const sourceSteps = { 'NVD/CVE': 'NVD NIST database', 'GitHub': 'GitHub code search API', 'Dark Web': 'Ahmia dark web + paste dumps + ransomware.live', 'CT Logs': 'crt.sh certificate transparency', 'ExploitDB': 'ExploitDB', 'MISP': 'MISP threat feeds', 'Firmware Repos': 'firmware repository mirrors' };
   config.sources.forEach(s => {
     if (sourceSteps[s]) { steps.push({ text: `Querying ${sourceSteps[s]}...`, type: 'info', delay: 500 + Math.random() * 500 }); steps.push({ text: `${s} scan complete`, type: 'ok', delay: 200 + Math.random() * 200 }); }
   });
