@@ -1528,10 +1528,49 @@ async function fetchRansomwareLive() {
     ...v
   }));
 
-  // Filter for automotive-relevant victims using the classifier
+  // Filter for automotive-relevant victims using STRICT matching
+  // A company named "Ford Construction" should NOT match — only real automotive businesses
   const automotiveVictims = victims.filter(v => {
+    const victimName = (v.victim || v.post_title || '').toLowerCase();
+    const domain = (v.domain || '').toLowerCase();
+    const description = (v.description || '').toLowerCase();
+    const activity = (v.activity || '').toLowerCase();
     const text = `${v.victim} ${v.domain} ${v.description} ${v.activity}`;
-    return isAutomotiveRelevant(text, v.group);
+
+    // Must match an explicit automotive business pattern in victim name or description
+    const autoBusinessPatterns = [
+      /\b(auto|motor|car|vehicle|automotive)\s+(dealer|dealership|group|company|corp|works|manufacturing|parts|service|repair|rental|leasing|sales)/i,
+      /\b(dealer|dealership)\s+(of |for )?(toyota|honda|ford|bmw|audi|mercedes|volkswagen|hyundai|kia|nissan|mazda|subaru|volvo|lexus|tesla|porsche|jaguar|land\s+rover|cadillac|chevrolet|buick|gmc|chrysler|jeep|dodge|ram|acura|infiniti|lincoln)/i,
+      /\b(toyota|honda|ford|bmw|audi|mercedes|volkswagen|hyundai|kia|nissan|mazda|subaru|volvo|lexus|tesla|porsche)\s+(dealer|dealership|motors|motor|group|auto|service|parts|sales|leasing|rental)/i,
+      /\b(tire|tyre|brake|exhaust|windshield|glass)\s+(center|centre|shop|service|dealer|company|corp|group|manufacturing|factory)/i,
+      /\b(fleet|logistics|trucking|transport)\s+(management|company|corp|group|solutions|services)/i,
+      /\b(auto|car|vehicle)\s+(parts|repair|service|glass|body|paint|wrecking|salvage|auction)/i,
+      /\b(automotive|automobile|auto\s+parts|car\s+rental|car\s+sharing|mobility)\b/i,
+      /\b(connected\s+car|smart\s+vehicle|electric\s+vehicle|autonomous\s+driving|telematics|v2x|ota\s+update)\b/i,
+      /\b(ECU|TCU|OBD|CAN\s+bus|AUTOSAR)\b/i,
+      /\b(manufactur|supplier|vendor|oem)\b.*\b(auto|motor|vehicle|car|tire|brake)/i,
+      /\b(auto|motor|vehicle|car|tire|brake)\b.*\b(manufactur|supplier|vendor)/i,
+      // Exact OEM/supplier names as whole words in victim name
+      /^toyota\b/i, /^honda\b/i, /^ford\s+motor/i, /^bmw\b/i, /^audi\b/i,
+      /^mercedes/i, /^volkswagen/i, /^hyundai/i, /^kia\b/i, /^nissan/i,
+      /^stellantis/i, /^volvo/i, /^tesla/i, /^porsche/i, /^continental/i,
+      /^bosch\b/i, /^denso/i, /^aptiv/i, /^magna/i, /^zf\s+group/i,
+      /^lear\s+corp/i, /^valeo/i, /^forvia/i, /^faurecia/i,
+      /^ariens/i, /^polaris/i, /^john\s+deere/i, /^caterpillar/i,
+      /^freightliner/i, /^kenworth/i, /^peterbilt/i, /^navistar/i,
+      /^scania/i, /^man\s+truck/i, /^iveco/i, /^daf\b/i
+    ];
+
+    // Check if the victim matches any automotive business pattern
+    const fullText2 = `${victimName} ${domain} ${description} ${activity}`;
+    const isAutoBusiness = autoBusinessPatterns.some(p => p.test(fullText2));
+
+    // Also run through the classifier, but require higher threshold (8 instead of 5)
+    const classifyResult = classifyAutomotiveRelevance(text, v.group);
+    if (classifyResult.rejected) return false;
+
+    // Accept if EITHER the strict business pattern matches OR classifier score >= 10
+    return isAutoBusiness || classifyResult.score >= 10;
   });
 
   console.log(`[CARTINT] Dark Web (${usedSource}): ${automotiveVictims.length} automotive-related victims out of ${victims.length} total`);
@@ -1682,9 +1721,9 @@ async function fetchAhmiaDarkWeb() {
     try {
       let results = null;
 
-      // Try local proxy API first (returns parsed JSON)
+      // Try local proxy API first (returns parsed JSON — searches Ahmia + Tor engines via Tor)
       try {
-        const resp = await fetch(`http://localhost:3001/api/ahmia-search?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(30000) });
+        const resp = await fetch(`http://localhost:3001/api/ahmia-search?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(45000) });
         if (resp.ok) {
           const data = await resp.json();
           results = data.results || [];
@@ -1709,24 +1748,68 @@ async function fetchAhmiaDarkWeb() {
       }
 
       // Rate limit between queries
-      await new Promise(resolve => setTimeout(resolve, 2500));
+      await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (e) {
       console.warn(`[CARTINT] Ahmia search failed for "${query}":`, e.message);
     }
   }
 
-  // Filter through automotive classifier — stricter for dark web content
-  const relevant = allResults.filter(r => {
-    const text = `${r.title || ''} ${r.description || ''} ${r.url || ''}`;
-    const result = classifyAutomotiveRelevance(text, r._query || '');
-    if (result.rejected) return false;
-    // Higher threshold for dark web results (require score >= 8)
-    // to reduce false positives from dark web marketplace listings
-    return result.score >= 8;
-  });
+  // ---- Scrape actual .onion pages to verify automotive content ----
+  // Like Robin: search → scrape → filter on real page content
+  const verifiedResults = [];
+  const scrapePromises = [];
+  const scrapeLimit = Math.min(allResults.length, 15); // limit scrapes per poll
 
-  const threats = relevant.map(r => {
-    const fullText = `${r.title} ${r.description} ${r._query}`;
+  for (let i = 0; i < scrapeLimit; i++) {
+    const r = allResults[i];
+    if (!r.url || !r.url.includes('.onion')) continue;
+
+    scrapePromises.push(
+      (async () => {
+        try {
+          let scraped = null;
+          // Try proxy scraper first
+          try {
+            const resp = await fetch(`http://localhost:3001/api/darkweb-scrape?url=${encodeURIComponent(r.url)}`, { signal: AbortSignal.timeout(30000) });
+            if (resp.ok) scraped = await resp.json();
+          } catch (e) { /* proxy not available */ }
+
+          if (scraped && scraped.text) {
+            // Verify the ACTUAL PAGE CONTENT is automotive-related
+            // Require score >= 12 (multiple strong matches) to eliminate false positives
+            const pageResult = classifyAutomotiveRelevance(scraped.text, r._query);
+            if (!pageResult.rejected && pageResult.score >= 12) {
+              return {
+                ...r,
+                scrapedText: scraped.text.substring(0, 500),
+                scrapedTitle: scraped.title || r.title,
+                _pageScore: pageResult.score,
+                _pageReasons: pageResult.reasons
+              };
+            }
+          } else {
+            // Can't scrape (no Tor) — fall back to strict metadata filter
+            // Require score >= 10 (exact OEM/supplier or multiple strong keywords)
+            const metaResult = classifyAutomotiveRelevance(`${r.title} ${r.description}`, r._query);
+            if (!metaResult.rejected && metaResult.score >= 10) {
+              return { ...r, _pageScore: metaResult.score, _pageReasons: metaResult.reasons };
+            }
+          }
+          return null;
+        } catch (e) {
+          return null;
+        }
+      })()
+    );
+  }
+
+  const scrapeResults = await Promise.all(scrapePromises);
+  for (const r of scrapeResults) {
+    if (r) verifiedResults.push(r);
+  }
+
+  const threats = verifiedResults.map(r => {
+    const fullText = `${r.scrapedTitle || r.title || ''} ${r.scrapedText || r.description || ''} ${r._query}`;
     const techniques = extractTechniques(fullText);
     const component = extractComponent(fullText);
     const oem = extractOEM(fullText);
@@ -1734,31 +1817,31 @@ async function fetchAhmiaDarkWeb() {
 
     // Determine severity from content
     let severity = 'medium';
-    const lowerDesc = (r.description || '').toLowerCase();
+    const lowerDesc = (r.scrapedText || r.description || '').toLowerCase();
     if (/exploit|vulnerability|breach|leak|dump|ransomware/i.test(lowerDesc)) severity = 'high';
     if (/credential|password|api.?key|secret|token|private.?key/i.test(lowerDesc)) severity = 'critical';
     if (/bypass|unlock|immobilizer|backdoor/i.test(lowerDesc)) severity = 'critical';
 
     return {
       id: threatId,
-      title: `Dark Web: ${sanitize(r.title || r.url)}`,
+      title: `Dark Web: ${sanitize(r.scrapedTitle || r.title)}`,
       severity,
       oem,
       component,
       techniques,
       source: 'Dark Web',
-      sourceDetail: `Ahmia Dark Web Search · "${sanitize(r._query)}"`,
-      confidence: 70,
+      sourceDetail: `Ahmia .onion scrape · "${sanitize(r._query)}" · score ${r._pageScore}`,
+      confidence: Math.min(90, 60 + r._pageScore),
       sources: 1,
       time: 'Recent',
       rawDate: new Date(),
       link: r.url || '#',
       _subSource: 'ahmia',
-      _classifyText: `${r.title} ${r.description}`
+      _classifyText: `${r.scrapedTitle || r.title} ${r.scrapedText || r.description}`
     };
   });
 
-  console.log(`[CARTINT] Ahmia: ${threats.length} automotive results from ${allResults.length} total dark web hits`);
+  console.log(`[CARTINT] Ahmia: ${threats.length} verified automotive results (scraped ${scrapeLimit} pages, ${allResults.length} total hits)`);
   return threats;
 }
 
@@ -1814,10 +1897,20 @@ async function fetchDarkWebPastes() {
     }
   }
 
-  // Filter through automotive classifier
+  // Filter through automotive classifier — require actual credential/code patterns
+  // Not just keyword match — the paste must contain actual secrets or code
   const relevant = allResults.filter(r => {
     const text = `${r.content || ''} ${r._query}`;
-    return isAutomotiveRelevant(text);
+    const result = classifyAutomotiveRelevance(text, r._query);
+    if (result.rejected) return false;
+    // Require score >= 8 AND actual credential/code patterns
+    if (result.score < 8) return false;
+    // Must contain actual credential patterns, not just keywords
+    const content = (r.content || '').toLowerCase();
+    const hasCredential = /(?:password|passwd|pwd|secret|api.?key|api.?token|access.?key|secret.?key|private.?key|client.?secret|auth.?token|bearer)/i.test(content);
+    const hasCode = /(?:\$\{|=>|function\s|import\s|require\(|#!\/|config\[|process\.env|os\.environ|AWS_|STRIPE_|API_KEY=|TOKEN=|SECRET=)/i.test(content);
+    const hasAutomotiveCode = /(?:can_bus|canbus|obd2|obd-ii|uds_|doip_|ecu_|firmware|bootloader|secoc|autosar|v2x_|telematics|immobilizer|hsminput)/i.test(content);
+    return hasCredential || hasCode || hasAutomotiveCode;
   });
 
   const threats = relevant.map(r => {
@@ -1889,10 +1982,30 @@ async function fetchRansomwareGroupDetails() {
       const data = await resp.json();
       const victims = Array.isArray(data) ? data : (data && Array.isArray(data.victims) ? data.victims : []);
 
-      // Filter for automotive victims
+      // Filter for automotive victims — use strict business pattern matching
       const autoVictims = victims.filter(v => {
+        const victimName = (v.victim || v.post_title || '').toLowerCase();
+        const description = (v.description || '').toLowerCase();
+        const activity = (v.activity || '').toLowerCase();
         const text = `${v.victim || v.post_title || ''} ${v.domain || ''} ${v.description || ''} ${v.activity || ''}`;
-        return isAutomotiveRelevant(text, groupName);
+
+        // Must match explicit automotive business patterns
+        const autoBusinessPatterns = [
+          /\b(auto|motor|car|vehicle|automotive)\s+(dealer|dealership|group|company|corp|works|manufacturing|parts|service|repair|rental|leasing|sales)/i,
+          /\b(toyota|honda|ford|bmw|audi|mercedes|volkswagen|hyundai|kia|nissan|mazda|subaru|volvo|lexus|tesla|porsche)\s+(dealer|dealership|motors|motor|group|auto|service|parts)/i,
+          /\b(tire|tyre|brake)\s+(center|centre|shop|service|company|manufacturing|factory)/i,
+          /\b(fleet|logistics|trucking)\s+(management|company|corp|group|solutions)/i,
+          /\b(auto|car|vehicle)\s+(parts|repair|service|body|wrecking|auction)/i,
+          /\b(automotive|automobile|connected\s+car|telematics|electric\s+vehicle)\b/i,
+          /\b(manufactur|supplier)\b.*\b(auto|motor|vehicle|car|tire|brake)/i,
+          /\b(auto|motor|vehicle|car|tire|brake)\b.*\b(manufactur|supplier)/i,
+          /^toyota\b/i, /^honda\b/i, /^ford\s+motor/i, /^bmw\b/i, /^audi\b/i,
+          /^mercedes/i, /^volkswagen/i, /^hyundai/i, /^kia\b/i, /^nissan/i,
+          /^stellantis/i, /^volvo/i, /^tesla/i, /^continental/i,
+          /^bosch\b/i, /^denso/i, /^aptiv/i, /^magna/i
+        ];
+        const fullText2 = `${victimName} ${v.domain || ''} ${description} ${activity}`;
+        return autoBusinessPatterns.some(p => p.test(fullText2));
       });
 
       for (const v of autoVictims.slice(0, 5)) { // Max 5 per group
